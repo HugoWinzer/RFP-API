@@ -5,3 +5,4 @@ google-auth
 langchain
 faiss-cpu
 tiktoken
+langchain-community
