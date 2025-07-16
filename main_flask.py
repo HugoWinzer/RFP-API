@@ -12,20 +12,30 @@ import gspread
 app = Flask(__name__)
 CORS(app)
 
+
 def get_google_credentials(scopes):
-    service_json = os.getenv("GOOGLE_SERVICE_ACCOUNT")
-    info = json.loads(service_json)
-    return service_account.Credentials.from_service_account_info(info, scopes=scopes)
+    raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT")
+    if raw_json is None:
+        raise ValueError("GOOGLE_SERVICE_ACCOUNT environment variable is not set")
+
+    try:
+        info = json.loads(raw_json)
+        return service_account.Credentials.from_service_account_info(info, scopes=scopes)
+    except Exception as e:
+        raise ValueError(f"Failed to load service account: {e}")
+
 
 def get_docs_client():
     creds = get_google_credentials(scopes=["https://www.googleapis.com/auth/documents"])
     return build('docs', 'v1', credentials=creds)
+
 
 def get_sheets_data(sheet_id, tab_name):
     creds = get_google_credentials(scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"])
     client = gspread.authorize(creds)
     sheet = client.open_by_key(sheet_id).worksheet(tab_name)
     return sheet.get_all_records()
+
 
 @app.route("/multi", methods=["POST"])
 def generate_multiple_rfp_sections():
@@ -44,17 +54,31 @@ def generate_multiple_rfp_sections():
     if not openai_api_key:
         return jsonify({"error": "OPENAI_API_KEY not set"}), 500
 
+    # Debug checks
+    print("✅ Env check — GOOGLE_SERVICE_ACCOUNT loaded:", bool(os.getenv("GOOGLE_SERVICE_ACCOUNT")))
+    print("✅ Env check — OPENAI_API_KEY loaded:", bool(openai_api_key))
+    print("✅ FAISS index exists:", os.path.exists("faiss_index"))
+
     try:
         rows = get_sheets_data(sheet_id, tab_name)
     except Exception as e:
         return jsonify({"error": f"Failed to read sheet: {e}"}), 500
 
-    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
-    vectorstore = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
-    client = OpenAI(api_key=openai_api_key)
-    docs_client = get_docs_client()
-    doc = docs_client.documents().get(documentId=doc_id).execute()
-    end_index = doc['body']['content'][-1]['endIndex'] - 1
+    try:
+        embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+        if not os.path.exists("faiss_index"):
+            return jsonify({"error": "FAISS index folder not found"}), 500
+        vectorstore = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
+    except Exception as e:
+        return jsonify({"error": f"Failed to load FAISS index: {e}"}), 500
+
+    try:
+        client = OpenAI(api_key=openai_api_key)
+        docs_client = get_docs_client()
+        doc = docs_client.documents().get(documentId=doc_id).execute()
+        end_index = doc['body']['content'][-1]['endIndex'] - 1
+    except Exception as e:
+        return jsonify({"error": f"Failed to load or write to Google Doc: {e}"}), 500
 
     requests = []
     for row in rows:
@@ -63,7 +87,11 @@ def generate_multiple_rfp_sections():
         if not requirement or not base_response:
             continue
 
-        docs = vectorstore.similarity_search(requirement, k=3)
+        try:
+            docs = vectorstore.similarity_search(requirement, k=3)
+        except Exception as e:
+            return jsonify({"error": f"Vector search failed: {e}"}), 500
+
         context = "\n---\n".join([doc.page_content for doc in docs])
 
         prompt = f"""
@@ -84,14 +112,17 @@ Supporting context:
 Write a clear, narrative, persuasive section. Start with a bold, clear heading derived from the requirement. Do not use markdown or hashtags. This heading should summarize the requirement. Then follow with the full response text.
 """
 
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4
-        )
-        text = response.choices[0].message.content.strip()
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.4
+            )
+            text = response.choices[0].message.content.strip()
+        except Exception as e:
+            return jsonify({"error": f"OpenAI call failed: {e}"}), 500
 
-        # Split first line as heading, rest as content
+        # Split heading and body
         lines = text.split("\n", 1)
         heading = lines[0].strip()
         body = lines[1].strip() if len(lines) > 1 else ""
@@ -135,8 +166,13 @@ Write a clear, narrative, persuasive section. Start with a bold, clear heading d
     if not requests:
         return jsonify({"error": "No valid rows to process"}), 400
 
-    docs_client.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
+    try:
+        docs_client.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
+    except Exception as e:
+        return jsonify({"error": f"Failed to update Google Doc: {e}"}), 500
+
     return jsonify({"status": "ok", "message": "All sections inserted"}), 200
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
