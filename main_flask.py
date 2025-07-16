@@ -1,11 +1,10 @@
-
 import os
-import openai
 from flask import Flask, request, jsonify
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from langchain.vectorstores import FAISS
 from langchain.embeddings import OpenAIEmbeddings
+from openai import OpenAI
 
 app = Flask(__name__)
 
@@ -29,11 +28,11 @@ def generate_rfp_response():
     if not all([requirement, base_response, doc_id]):
         return jsonify({"error": "Missing required fields"}), 400
 
-    openai.api_key = os.getenv("OPENAI_API_KEY")
-    if not openai.api_key:
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
         return jsonify({"error": "OPENAI_API_KEY not set"}), 500
 
-    embeddings = OpenAIEmbeddings(openai_api_key=openai.api_key)
+    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
     vectorstore = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
 
     docs = vectorstore.similarity_search(requirement, k=3)
@@ -57,14 +56,13 @@ Supporting context:
 Write a clear, narrative, persuasive section starting with a bold heading (no asterisks). Use a confident and informative tone suitable for large-scale partners.
 """
 
-client = openai.OpenAI()
-response = client.chat.completions.create(
-    model="gpt-4o",
-    messages=[{"role": "user", "content": prompt}],
-    temperature=0.4
-)
-text = response.choices[0].message.content.strip()
-
+    client = OpenAI(api_key=openai_api_key)
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.4
+    )
+    text = response.choices[0].message.content.strip()
 
     docs_client = get_docs_client()
     doc = docs_client.documents().get(documentId=doc_id).execute()
