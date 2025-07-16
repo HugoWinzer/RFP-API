@@ -1,6 +1,6 @@
-
 import os
 from flask import Flask, request, jsonify
+from flask_cors import CORS  # ✅ Added
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from langchain.vectorstores import FAISS
@@ -9,6 +9,7 @@ from openai import OpenAI
 import gspread
 
 app = Flask(__name__)
+CORS(app)  # ✅ Enables frontend-backend communication
 
 def get_docs_client():
     creds = service_account.Credentials.from_service_account_file(
