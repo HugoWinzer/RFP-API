@@ -12,30 +12,28 @@ import gspread
 app = Flask(__name__)
 CORS(app)
 
-
 def get_google_credentials(scopes):
     raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT")
     if raw_json is None:
         raise ValueError("GOOGLE_SERVICE_ACCOUNT environment variable is not set")
-
+    
     try:
-        info = json.loads(raw_json)
+        # First parse: unwrap string if needed
+        parsed_string = json.loads(raw_json)
+        info = json.loads(parsed_string) if isinstance(parsed_string, str) else parsed_string
         return service_account.Credentials.from_service_account_info(info, scopes=scopes)
     except Exception as e:
         raise ValueError(f"Failed to load service account: {e}")
 
-
 def get_docs_client():
     creds = get_google_credentials(scopes=["https://www.googleapis.com/auth/documents"])
     return build('docs', 'v1', credentials=creds)
-
 
 def get_sheets_data(sheet_id, tab_name):
     creds = get_google_credentials(scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"])
     client = gspread.authorize(creds)
     sheet = client.open_by_key(sheet_id).worksheet(tab_name)
     return sheet.get_all_records()
-
 
 @app.route("/multi", methods=["POST"])
 def generate_multiple_rfp_sections():
@@ -54,9 +52,9 @@ def generate_multiple_rfp_sections():
     if not openai_api_key:
         return jsonify({"error": "OPENAI_API_KEY not set"}), 500
 
-    # Debug checks
-    print("✅ Env check — GOOGLE_SERVICE_ACCOUNT loaded:", bool(os.getenv("GOOGLE_SERVICE_ACCOUNT")))
-    print("✅ Env check — OPENAI_API_KEY loaded:", bool(openai_api_key))
+    # Debug environment loading
+    print("✅ GOOGLE_SERVICE_ACCOUNT exists:", bool(os.getenv("GOOGLE_SERVICE_ACCOUNT")))
+    print("✅ OPENAI_API_KEY exists:", bool(openai_api_key))
     print("✅ FAISS index exists:", os.path.exists("faiss_index"))
 
     try:
@@ -172,7 +170,6 @@ Write a clear, narrative, persuasive section. Start with a bold, clear heading d
         return jsonify({"error": f"Failed to update Google Doc: {e}"}), 500
 
     return jsonify({"status": "ok", "message": "All sections inserted"}), 200
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
