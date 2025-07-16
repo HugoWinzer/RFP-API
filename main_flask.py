@@ -1,6 +1,7 @@
 import os
+import json
 from flask import Flask, request, jsonify
-from flask_cors import CORS  # ✅ Added
+from flask_cors import CORS
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from langchain.vectorstores import FAISS
@@ -9,20 +10,19 @@ from openai import OpenAI
 import gspread
 
 app = Flask(__name__)
-CORS(app)  # ✅ Enables frontend-backend communication
+CORS(app)
+
+def get_google_credentials(scopes):
+    service_json = os.getenv("GOOGLE_SERVICE_ACCOUNT")
+    info = json.loads(service_json)
+    return service_account.Credentials.from_service_account_info(info, scopes=scopes)
 
 def get_docs_client():
-    creds = service_account.Credentials.from_service_account_file(
-        "service_account.json",
-        scopes=["https://www.googleapis.com/auth/documents"]
-    )
+    creds = get_google_credentials(scopes=["https://www.googleapis.com/auth/documents"])
     return build('docs', 'v1', credentials=creds)
 
 def get_sheets_data(sheet_id, tab_name):
-    creds = service_account.Credentials.from_service_account_file(
-        "service_account.json",
-        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
-    )
+    creds = get_google_credentials(scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"])
     client = gspread.authorize(creds)
     sheet = client.open_by_key(sheet_id).worksheet(tab_name)
     return sheet.get_all_records()
