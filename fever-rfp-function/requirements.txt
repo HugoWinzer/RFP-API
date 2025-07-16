@@ -1,0 +1,7 @@
+functions-framework
+openai
+google-api-python-client
+google-auth
+langchain
+faiss-cpu
+tiktoken
