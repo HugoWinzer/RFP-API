@@ -63,7 +63,11 @@ def generate_multiple_rfp_sections():
         return jsonify({"error": f"Failed to read sheet: {e}"}), 500
 
     try:
-        embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+        from openai import AsyncOpenAI, OpenAI
+from langchain_community.embeddings import OpenAIEmbeddings
+
+client = OpenAI(api_key=openai_api_key)
+embeddings = OpenAIEmbeddings(client=client)
         if not os.path.exists("faiss_index"):
             return jsonify({"error": "FAISS index folder not found"}), 500
         vectorstore = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
