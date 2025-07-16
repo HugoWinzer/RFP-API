@@ -57,13 +57,14 @@ Supporting context:
 Write a clear, narrative, persuasive section starting with a bold heading (no asterisks). Use a confident and informative tone suitable for large-scale partners.
 """
 
-    result = openai.ChatCompletion.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.4
-    )
+client = openai.OpenAI()
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": prompt}],
+    temperature=0.4
+)
+text = response.choices[0].message.content.strip()
 
-    text = result.choices[0].message.content.strip()
 
     docs_client = get_docs_client()
     doc = docs_client.documents().get(documentId=doc_id).execute()
