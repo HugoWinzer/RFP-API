@@ -18,7 +18,6 @@ def get_google_credentials(scopes):
         raise ValueError("GOOGLE_SERVICE_ACCOUNT environment variable is not set")
     
     try:
-        # First parse: unwrap string if needed
         parsed_string = json.loads(raw_json)
         info = json.loads(parsed_string) if isinstance(parsed_string, str) else parsed_string
         return service_account.Credentials.from_service_account_info(info, scopes=scopes)
@@ -52,7 +51,6 @@ def generate_multiple_rfp_sections():
     if not openai_api_key:
         return jsonify({"error": "OPENAI_API_KEY not set"}), 500
 
-    # Debug environment loading
     print("✅ GOOGLE_SERVICE_ACCOUNT exists:", bool(os.getenv("GOOGLE_SERVICE_ACCOUNT")))
     print("✅ OPENAI_API_KEY exists:", bool(openai_api_key))
     print("✅ FAISS index exists:", os.path.exists("faiss_index"))
@@ -63,19 +61,17 @@ def generate_multiple_rfp_sections():
         return jsonify({"error": f"Failed to read sheet: {e}"}), 500
 
     try:
-        from openai import AsyncOpenAI, OpenAI
-from langchain_community.embeddings import OpenAIEmbeddings
+        client = OpenAI(api_key=openai_api_key)
+        embeddings = OpenAIEmbeddings(client=client)
 
-client = OpenAI(api_key=openai_api_key)
-embeddings = OpenAIEmbeddings(client=client)
         if not os.path.exists("faiss_index"):
             return jsonify({"error": "FAISS index folder not found"}), 500
+
         vectorstore = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
     except Exception as e:
         return jsonify({"error": f"Failed to load FAISS index: {e}"}), 500
 
     try:
-        client = OpenAI(api_key=openai_api_key)
         docs_client = get_docs_client()
         doc = docs_client.documents().get(documentId=doc_id).execute()
         end_index = doc['body']['content'][-1]['endIndex'] - 1
