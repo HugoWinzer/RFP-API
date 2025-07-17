@@ -120,7 +120,6 @@ Write a clear, narrative, persuasive section. Start with a bold, clear heading d
         except Exception as e:
             return jsonify({"error": f"OpenAI call failed: {e}"}), 500
 
-        # Split heading and body
         lines = text.split("\n", 1)
         heading = lines[0].strip()
         body = lines[1].strip() if len(lines) > 1 else ""
