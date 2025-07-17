@@ -5,6 +5,6 @@ google-auth==2.29.0
 gspread==5.12.0
 flask==2.3.3
 flask-cors==4.0.0
-git+https://github.com/langchain-ai/langchain.git@491f63ca82806a98b18f785d0d315e7f5d8de29f#egg=langchain-community&subdirectory=libs/langchain_community
+git+https://github.com/langchain-ai/langchain.git@491f63ca82806a98b18f785d0d315e7f5d8de29f
 faiss-cpu==1.7.3
 tiktoken==0.7.0
