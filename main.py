@@ -1,83 +1,77 @@
-
-import functions_framework
-import openai
-import os
+cat > main.py << 'EOF'
+import os, pickle, traceback, json
+from flask import Flask, request, jsonify
 from googleapiclient.discovery import build
-from google.oauth2 import service_account
-from langchain.vectorstores import FAISS
-from langchain.embeddings import OpenAIEmbeddings
+import openai, faiss
 
-def get_docs_client():
-    creds = service_account.Credentials.from_service_account_file(
-        "service_account.json",
-        scopes=["https://www.googleapis.com/auth/documents"]
-    )
-    return build('docs', 'v1', credentials=creds)
+app = Flask(__name__)
 
-@functions_framework.http
-def generate_rfp_response(request):
-    data = request.get_json(silent=True)
-    if not data:
-        return {"error": "Missing JSON payload"}, 400
+# Load FAISS index once
+with open("faiss_index.pkl","rb") as f:
+    faiss_index = pickle.load(f)
 
-    requirement = data.get("requirement")
-    base_response = data.get("response")
-    doc_id = data.get("doc_id")
+# Ensure OpenAI key is set
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-    if not all([requirement, base_response, doc_id]):
-        return {"error": "Missing required fields"}, 400
+@app.route("/start", methods=["POST"])
+def start():
+    try:
+        data     = request.get_json()
+        sheet_id = data["sheet_id"]
+        doc_id   = data["doc_id"]
 
-    openai.api_key = os.environ.get("OPENAI_API_KEY")
-    if not openai.api_key:
-        return {"error": "OPENAI_API_KEY not set in environment"}, 500
+        # Dynamically pick the first tab
+        sheets_svc = build("sheets","v4").spreadsheets()
+        meta = sheets_svc.get(
+            spreadsheetId=sheet_id,
+            fields="sheets(properties(title))"
+        ).execute()
+        first_tab   = meta["sheets"][0]["properties"]["title"]
+        sheet_range = f"{first_tab}!A2:B"
+        print("Using range:", sheet_range)
 
-    embeddings = OpenAIEmbeddings(openai_api_key=openai.api_key)
+        # Read requirements + functionality
+        resp = sheets_svc.values().get(
+            spreadsheetId=sheet_id, range=sheet_range
+        ).execute()
+        rows = resp.get("values", [])
+        print(f"Got {len(rows)} rows")
 
-    # Local path for development or cloud-based FAISS index
-    index_path = "faiss_index"
-    vectorstore = FAISS.load_local(index_path, embeddings, allow_dangerous_deserialization=True)
+        if not rows:
+            return jsonify(error="No data in sheet!"), 400
 
-    docs = vectorstore.similarity_search(requirement, k=3)
-    context = "\n---\n".join([doc.page_content for doc in docs])
+        docs_svc = build("docs","v1").documents()
+        for idx, row in enumerate(rows, start=2):
+            req = row[0]
+            fnc = row[1] if len(row)>1 else ""
+            prompt = (
+                f"You are Fever’s RFP AI assistant.\n"
+                f"Requirement: {req}\n"
+                f"Functionality: {fnc}\n"
+                "Write a narrative‐rich paragraph explaining how this functionality meets the requirement.\n"
+            )
+            ai_resp = openai.Completion.create(
+                model="text-davinci-003",
+                prompt=prompt,
+                max_tokens=300
+            )
+            enriched = ai_resp.choices[0].text.strip()
 
-    prompt = f"""
-You are a professional RFP proposal writer working for Fever, a global leader in ticketed experiences.
-Your goal is to craft a compelling, polished section of an RFP response based on:
-1. The RFP requirement below
-2. Fever's base feature response
-3. Additional supporting context pulled from internal documentation
+            docs_svc.batchUpdate(documentId=doc_id, body={
+              "requests":[{"insertText":{
+                 "endOfSegmentLocation":{}, 
+                 "text": enriched + "\n\n"
+              }}]
+            }).execute()
+            print(f"Done row {idx}")
 
-Section: {requirement}
+        return jsonify(status="complete", rows=len(rows)), 200
 
-Base Response:
-{base_response}
+    except Exception:
+        traceback.print_exc()
+        return jsonify(error="Internal error"), 500
 
-Supporting context:
-{context}
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+EOF
 
-Write a clear, narrative, persuasive section starting with a bold heading (no asterisks). Use a confident and informative tone suitable for large-scale partners.
-"""
-
-    result = openai.ChatCompletion.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.4
-    )
-
-    text = result.choices[0].message.content.strip()
-
-    # Insert at end of document
-    docs_client = get_docs_client()
-    doc = docs_client.documents().get(documentId=doc_id).execute()
-    end_index = doc['body']['content'][-1]['endIndex'] - 1
-
-    docs_client.documents().batchUpdate(
-        documentId=doc_id,
-        body={'requests': [{'insertText': {'location': {'index': end_index}, 'text': f"\n\n{text}\n"}}]}
-    ).execute()
-
-    return {
-        "status": "ok",
-        "message": "RFP section inserted",
-        "text": text
-    }, 200
